@@ -1,0 +1,6 @@
+{
+  "name": "AI Powered Database Reviewer",
+  "description": "Privacy-first AI-powered database review, optimization, and copilot platform with deterministic auditing, health scoring, interactive ER diagrams, and Ollama support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
