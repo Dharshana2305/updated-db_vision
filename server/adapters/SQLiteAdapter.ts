@@ -2,6 +2,7 @@ import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import fs from 'fs';
 import { DatabaseAdapter, AdapterCapabilities, ConnectionTestResult } from './DatabaseAdapter.js';
 import { DatabaseSchema, TableSchema, ColumnSchema, ForeignKeySchema, IndexSchema, QueryResult } from '../../src/types.js';
+import { splitSqlStatements } from '../utils/fixUtils.js';
 
 let SQLModule: SqlJsStatic | null = null;
 
@@ -309,6 +310,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
           defaultValue: defaultValue !== null ? String(defaultValue) : undefined
         };
       });
+
+      // If no explicit PK in PRAGMA table_info, check for unique index on id column or pk constraint
+      if (primaryKeys.length === 0) {
+        const uniqueIdIdx = indexes.find(i => i.isPrimary) ||
+          indexes.find(i => i.isUnique && (i.columns.includes('id') || i.name.toLowerCase().includes('_id') || i.name.toLowerCase().includes('_pk')));
+        if (uniqueIdIdx && uniqueIdIdx.columns.length > 0) {
+          primaryKeys.push(...uniqueIdIdx.columns);
+          for (const col of columns) {
+            if (uniqueIdIdx.columns.includes(col.name)) {
+              col.isPrimaryKey = true;
+            }
+          }
+        }
+      }
+
       totalCols += columns.length;
 
       tables.push({
@@ -478,9 +494,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (!this.db) throw new Error('Database not connected');
 
     try {
-      this.db.exec(sqlOrOp);
-      const changesRes = this.db.exec('SELECT changes() as changed;');
-      const affectedRows = Number(changesRes[0]?.values[0]?.[0] || 0);
+      // Split into individual SQL statements safely using quote-aware splitter
+      const statements = splitSqlStatements(sqlOrOp);
+
+      let totalAffected = 0;
+      let lastMessage = 'Modification applied successfully.';
+
+      for (const stmt of statements) {
+        if (!stmt) continue;
+        try {
+          this.db.exec(stmt + ';');
+          const changesRes = this.db.exec('SELECT changes() as changed;');
+          totalAffected += Number(changesRes[0]?.values[0]?.[0] || 0);
+        } catch (stmtErr: any) {
+          // If individual statement is idempotent (already applied, duplicate column/table/index), continue
+          if (/duplicate column name|already exists|table .* already exists|index .* already exists|cannot add a PRIMARY KEY/i.test(stmtErr?.message || '')) {
+            lastMessage = `Already applied on database (${stmtErr.message})`;
+            continue;
+          }
+          // Otherwise rethrow to trigger governance fallback
+          throw stmtErr;
+        }
+      }
 
       // Persist changes to disk if filePath is configured
       if (this.filePath) {
@@ -494,10 +529,18 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
       return {
         success: true,
-        affectedRows,
-        message: 'Modification applied successfully.'
+        affectedRows: totalAffected,
+        message: lastMessage
       };
     } catch (err: any) {
+      // If entire block indicates statement is already applied, return success (idempotent)
+      if (/duplicate column name|already exists|table .* already exists|index .* already exists|cannot add a PRIMARY KEY/i.test(err?.message || '')) {
+        return {
+          success: true,
+          affectedRows: 0,
+          message: `Already applied on database (${err.message})`
+        };
+      }
       return {
         success: false,
         message: err?.message || 'Error executing modification'

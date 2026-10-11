@@ -43,22 +43,18 @@ export const FindingsPage: React.FC = () => {
   const [downloadDropdown, setDownloadDropdown] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showFixedBanner, setShowFixedBanner] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const findings = latestReview?.findings || [];
 
   const handleFixAll = async () => {
     if (!activeProject || isBulkFixing) return;
-    const countToFix = findings.filter(f => f.status === 'OPEN').length;
-
-    if (!confirm(`Apply all ${countToFix} open findings & flaw remediations in one click? This will execute all safe fixes directly on the active database.`)) {
-      return;
-    }
 
     setIsBulkFixing(true);
     setActionFeedback(null);
     try {
       const res = await api.fixAllFindingsAndFlaws(activeProject.id);
-      setActionFeedback({ type: 'success', message: res.message });
+      setActionFeedback({ type: 'success', message: res.message || 'All findings and flaws remediated successfully!' });
       setShowFixedBanner(true);
       await refreshReviewData();
       await refreshSchema();
@@ -66,6 +62,24 @@ export const FindingsPage: React.FC = () => {
       setActionFeedback({ type: 'error', message: `1-Click Fix failed: ${err.message}` });
     } finally {
       setIsBulkFixing(false);
+    }
+  };
+
+  const handleResetAudit = async () => {
+    if (!activeProject || isResetting) return;
+
+    setIsResetting(true);
+    setActionFeedback(null);
+    try {
+      const res = await api.resetAudit(activeProject.id);
+      setActionFeedback({ type: 'success', message: res.message || 'Audit reset: flaws re-opened for testing!' });
+      setShowFixedBanner(false);
+      await refreshReviewData();
+      await refreshSchema();
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', message: `Reset failed: ${err.message}` });
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -169,17 +183,26 @@ export const FindingsPage: React.FC = () => {
 
         {/* 1-Click Action Buttons */}
         <div className="flex items-center gap-2">
-          {openCount > 0 && (
-            <button
-              onClick={handleFixAll}
-              disabled={isBulkFixing}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              title="Fix all open findings & flaws in one click"
-            >
-              <Wand2 className="w-4 h-4" />
-              <span>{isBulkFixing ? 'Fixing All Flaws...' : `Fix All Flaws (${openCount})`}</span>
-            </button>
-          )}
+          {/* Reset / Re-audit Flaws */}
+          <button
+            onClick={handleResetAudit}
+            disabled={isResetting || isBulkFixing}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-400 border border-sky-500/30 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+            title="Reset audit and re-open flaws to test 1-Click Fix"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+            <span>{isResetting ? 'Resetting...' : 'Reset Flaws'}</span>
+          </button>
+
+          <button
+            onClick={handleFixAll}
+            disabled={isBulkFixing || isResetting}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            title="Fix all open findings & flaws in one click"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>{isBulkFixing ? 'Fixing All Flaws...' : openCount > 0 ? `Fix All Flaws (${openCount})` : 'Re-verify & Fix All'}</span>
+          </button>
 
           {/* Download Updated File Button */}
           <div className="relative">

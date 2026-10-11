@@ -13,11 +13,11 @@ export class PerformanceAnalyzer {
 
         if (!hasCoveringIndex) {
           const indexName = `idx_${table.name}_${fk.columnName}`.toLowerCase();
-          const createIndexSql = `CREATE INDEX "${indexName}" ON "${table.name}" ("${fk.columnName}");`;
-          const dropIndexSql = `DROP INDEX "${indexName}";`;
+          const createIndexSql = `CREATE INDEX IF NOT EXISTS "${indexName}" ON "${table.name}" ("${fk.columnName}");`;
+          const dropIndexSql = `DROP INDEX IF EXISTS "${indexName}";`;
 
           findings.push({
-            id: `PERF-FK-IDX-${table.name}-${fk.columnName}-${findingIdx++}`,
+            id: `PERF-FK-IDX-${table.name}-${fk.columnName}`,
             title: `Missing Index on Foreign Key "${table.name}.${fk.columnName}"`,
             category: 'performance',
             severity: 'HIGH',
@@ -46,7 +46,7 @@ export class PerformanceAnalyzer {
         if (seenIndexSignatures.has(sig)) {
           const duplicateOf = seenIndexSignatures.get(sig)!;
           findings.push({
-            id: `PERF-DUP-IDX-${table.name}-${idx.name}-${findingIdx++}`,
+            id: `PERF-DUP-IDX-${table.name}-${idx.name}`,
             title: `Duplicate Index "${idx.name}" in "${table.name}"`,
             category: 'performance',
             severity: 'MEDIUM',
@@ -59,8 +59,8 @@ export class PerformanceAnalyzer {
             confidence: 95,
             risk: 'LOW',
             expectedImpact: 'Recovers disk space and improves write throughput for table modifications.',
-            suggestedFix: `DROP INDEX "${idx.name}";`,
-            rollbackSql: `CREATE INDEX "${idx.name}" ON "${table.name}" (${idx.columns.map(c => `"${c}"`).join(', ')});`,
+            suggestedFix: `DROP INDEX IF EXISTS "${idx.name}";`,
+            rollbackSql: `CREATE INDEX IF NOT EXISTS "${idx.name}" ON "${table.name}" (${idx.columns.map(c => `"${c}"`).join(', ')});`,
             status: 'OPEN',
             safeToApplyAuto: true
           });
@@ -73,7 +73,7 @@ export class PerformanceAnalyzer {
       const textColumns = table.columns.filter(c => c.dataType === 'TEXT' || c.dataType.includes('VARCHAR(MAX)'));
       if (textColumns.length >= 3 && table.rowCount > 500) {
         findings.push({
-          id: `PERF-WIDE-TXT-${table.name}-${findingIdx++}`,
+          id: `PERF-WIDE-TXT-${table.name}`,
           title: `Multiple Heavy TEXT Columns in Table "${table.name}"`,
           category: 'performance',
           severity: 'LOW',

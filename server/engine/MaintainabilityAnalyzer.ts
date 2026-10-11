@@ -16,7 +16,7 @@ export class MaintainabilityAnalyzer {
         // Check for cryptic single-character column names
         if (col.name.length === 1 && !col.isPrimaryKey) {
           findings.push({
-            id: `MAINT-CRYPTIC-${table.name}-${col.name}-${findingIdx++}`,
+            id: `MAINT-CRYPTIC-${table.name}-${col.name}`,
             title: `Cryptic Column Name "${col.name}" in Table "${table.name}"`,
             category: 'maintainability',
             severity: 'LOW',
@@ -41,7 +41,7 @@ export class MaintainabilityAnalyzer {
     // Flag mixed naming conventions across the schema
     if (hasSnakeCase && hasCamelCase) {
       findings.push({
-        id: `MAINT-MIXED-CASING-${findingIdx++}`,
+        id: `MAINT-MIXED-CASING`,
         title: 'Mixed Naming Conventions (snake_case and camelCase) in Schema',
         category: 'maintainability',
         severity: 'LOW',

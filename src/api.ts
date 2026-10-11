@@ -251,6 +251,17 @@ export const api = {
       method: 'POST'
     }),
 
+  resetAudit: (projectId: string) =>
+    request<{
+      success: boolean;
+      message: string;
+      review: Review;
+      recommendations: RecommendationItem[];
+      openCount: number;
+    }>(`/projects/${projectId}/reset-audit`, {
+      method: 'POST'
+    }),
+
   downloadUpdatedDatabaseFile: async (projectId: string, format: 'sqlite' | 'sql' = 'sqlite', customFilename?: string): Promise<void> => {
     const token = getAuthToken();
     const res = await fetch(`/api/projects/${projectId}/export?format=${format}`, {

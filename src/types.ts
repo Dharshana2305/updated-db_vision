@@ -205,7 +205,8 @@ export interface AuditLog {
     | 'QUERY_EXECUTED'
     | 'SCHEMA_MODIFIED'
     | 'DATABASE_CONNECTED'
-    | 'DATABASE_EXPORTED';
+    | 'DATABASE_EXPORTED'
+    | 'AUDIT_RESET';
   targetObject: string;
   details: string;
   sqlExecuted?: string;
@@ -301,6 +302,66 @@ export interface AppSettings {
   timeoutSeconds?: number;
   enablePiiMasking?: boolean;
   fallbackToRules?: boolean;
+  globalAutoRepairEmergencyStop?: boolean;
 }
 
 export type SystemSettings = AppSettings;
+
+export type RepairRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export type RepairStatus =
+  | 'QUEUED'
+  | 'EXECUTING'
+  | 'VERIFIED'
+  | 'VERIFICATION_FAILED'
+  | 'FAILED'
+  | 'ROLLED_BACK'
+  | 'BLOCKED_HIGH_RISK'
+  | 'ALREADY_SATISFIED';
+
+export interface RepairJob {
+  id: string;
+  projectId: string;
+  ruleId: string;
+  targetObject: string;
+  table: string;
+  column?: string;
+  riskLevel: RepairRiskLevel;
+  title: string;
+  description: string;
+  proposedSql: string;
+  rollbackSql?: string;
+  status: RepairStatus;
+  fingerprint: string;
+  retryCount: number;
+  maxRetries: number;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  executionDurationMs?: number;
+  executedSql?: string;
+  verificationDetails?: string;
+  errorMessage?: string;
+  isAutoRepair: boolean;
+}
+
+export interface AutoRepairPolicy {
+  projectId: string;
+  enabled: boolean;
+  allowedRiskLevels: ('LOW' | 'MEDIUM')[];
+  maxConcurrentJobs: number;
+  emergencyStop: boolean;
+  autoScanIntervalMinutes?: number;
+}
+
+export interface AutoRepairEngineStatus {
+  globalEmergencyStop: boolean;
+  workerActive: boolean;
+  lastScanTimestamp?: string;
+  totalVerifiedRepairs: number;
+  totalFailedRepairs: number;
+  totalBlockedHighRisk: number;
+  activeJobsCount: number;
+  queuedJobsCount: number;
+}
+

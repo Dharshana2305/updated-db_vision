@@ -8,7 +8,12 @@ import { HealthScorer } from './HealthScorer.js';
 import { DatabaseSchema, Finding, Review, RecommendationItem } from '../../src/types.js';
 
 export class ReviewEngine {
-  static async runReview(projectId: string, adapter: DatabaseAdapter, maxProfileRows = 500): Promise<{
+  static async runReview(
+    projectId: string,
+    adapter: DatabaseAdapter,
+    maxProfileRows = 500,
+    options?: { resetApplied?: boolean }
+  ): Promise<{
     review: Review;
     recommendations: RecommendationItem[];
   }> {
@@ -65,49 +70,46 @@ export class ReviewEngine {
     const severityOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
     allFindings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
-    // 4. Calculate deterministic health score
+    // Check if any findings or recommendations were already marked APPLIED in previous reviews of this project
+    if (!options?.resetApplied) {
+      const { store } = await import('../db/store.js');
+      const projectReviews = store.getReviews(projectId);
+      const existingRecs = store.getRecommendations(projectId);
+      const appliedIds = new Set<string>();
+
+      for (const rev of projectReviews) {
+        rev.findings.filter(f => f.status === 'APPLIED').forEach(f => {
+          appliedIds.add(f.id);
+          appliedIds.add(f.id.replace(/-[0-9]+$/, ''));
+        });
+      }
+
+      existingRecs.filter(r => r.status === 'APPLIED').forEach(r => {
+        appliedIds.add(r.id);
+        appliedIds.add(r.id.replace('REC-', ''));
+        appliedIds.add(r.id.replace(/-[0-9]+$/, ''));
+        appliedIds.add(r.findingId);
+        appliedIds.add(r.findingId.replace(/-[0-9]+$/, ''));
+      });
+
+      allFindings.forEach(f => {
+        const cleanId = f.id.replace(/-[0-9]+$/, '');
+        if (
+          appliedIds.has(f.id) ||
+          appliedIds.has(cleanId) ||
+          appliedIds.has(`REC-${f.id}`) ||
+          appliedIds.has(`REC-${cleanId}`)
+        ) {
+          f.status = 'APPLIED';
+        }
+      });
+    }
+
+    // 4. Calculate deterministic health score (excluding applied/resolved findings)
     const healthScore = HealthScorer.calculate(allFindings);
 
-    // 5. Build structured recommendations with safety checks and rollback operations
-    const recommendations: RecommendationItem[] = allFindings
-      .filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH' || f.severity === 'MEDIUM')
-      .map(f => {
-        const isSafeToApply = Boolean(f.suggestedFix);
-        let rollbackOp = f.rollbackSql;
-        if (!rollbackOp && f.suggestedFix) {
-          const matchIdx = f.suggestedFix.match(/CREATE INDEX (?:IF NOT EXISTS )?"?([^"\s]+)"?/i);
-          if (matchIdx) {
-            rollbackOp = `DROP INDEX IF EXISTS "${matchIdx[1]}";`;
-          }
-          const matchView = f.suggestedFix.match(/CREATE VIEW (?:IF NOT EXISTS )?"?([^"\s]+)"?/i);
-          if (matchView) {
-            rollbackOp = `DROP VIEW IF EXISTS "${matchView[1]}";`;
-          }
-        }
-
-        return {
-          id: `REC-${f.id}`,
-          projectId,
-          findingId: f.id,
-          title: f.title,
-          problem: f.description,
-          recommendation: f.recommendation,
-          why: f.whyItMatters,
-          expectedImpact: f.expectedImpact,
-          risk: f.risk,
-          safetyChecks: {
-            potentialLocks: f.category === 'performance' ? 'Brief shared metadata lock during index creation' : 'Potential table lock depending on row count',
-            dependencies: [f.table],
-            affectedObjects: [f.databaseObject],
-            potentialDataLoss: false,
-            breakingChanges: f.severity === 'CRITICAL' && f.category === 'structure',
-            safeToApply: isSafeToApply
-          },
-          proposedOperation: f.suggestedFix,
-          rollbackOperation: rollbackOp || `-- Rollback will update governance log status`,
-          status: 'PENDING'
-        };
-      });
+    // 5. Build structured recommendations with safety checks and rollback operations for all findings
+    const recommendations: RecommendationItem[] = ReviewEngine.buildRecommendations(projectId, allFindings);
 
     const reviewId = `REV-${Date.now()}`;
     const review: Review = {
@@ -122,5 +124,47 @@ export class ReviewEngine {
     };
 
     return { review, recommendations };
+  }
+
+  static buildRecommendations(projectId: string, findings: Finding[]): RecommendationItem[] {
+    return findings.map(f => {
+      const isSafeToApply = Boolean(f.suggestedFix);
+      let rollbackOp = f.rollbackSql;
+      if (!rollbackOp && f.suggestedFix) {
+        const matchIdx = f.suggestedFix.match(/CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?"?([^"\s]+)"?/i);
+        if (matchIdx) {
+          rollbackOp = `DROP INDEX IF EXISTS "${matchIdx[1]}";`;
+        }
+        const matchView = f.suggestedFix.match(/CREATE VIEW (?:IF NOT EXISTS )?"?([^"\s]+)"?/i);
+        if (matchView) {
+          rollbackOp = `DROP VIEW IF EXISTS "${matchView[1]}";`;
+        }
+      }
+
+      const isApplied = f.status === 'APPLIED';
+
+      return {
+        id: `REC-${f.id}`,
+        projectId,
+        findingId: f.id,
+        title: f.title,
+        problem: f.description,
+        recommendation: f.recommendation,
+        why: f.whyItMatters,
+        expectedImpact: f.expectedImpact,
+        risk: f.risk,
+        safetyChecks: {
+          potentialLocks: f.category === 'performance' ? 'Brief shared metadata lock during index creation' : 'Potential table lock depending on row count',
+          dependencies: [f.table],
+          affectedObjects: [f.databaseObject],
+          potentialDataLoss: false,
+          breakingChanges: f.severity === 'CRITICAL' && f.category === 'structure',
+          safeToApply: isSafeToApply
+        },
+        proposedOperation: f.suggestedFix || `-- Policy Guidance: ${f.title}\n-- Remediation: ${f.recommendation}`,
+        rollbackOperation: rollbackOp || `-- Rollback will update governance log status`,
+        status: isApplied ? 'APPLIED' : 'PENDING'
+      };
+    });
   }
 }

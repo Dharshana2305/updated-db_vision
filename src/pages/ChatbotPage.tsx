@@ -94,16 +94,13 @@ export const ChatbotPage: React.FC = () => {
 
   const handleClearHistory = async () => {
     if (!activeProject || clearing) return;
-    if (!confirm('Are you sure you want to clear chat history for this database? Other databases in this workspace will not be affected.')) {
-      return;
-    }
     setClearing(true);
     try {
       await api.clearChatHistory(activeProject.id, selectedDbKey);
       setMessages([]);
       loadChat(selectedDbKey);
     } catch (err: any) {
-      alert(`Failed to clear chat: ${err.message}`);
+      console.error('Failed to clear chat:', err);
     } finally {
       setClearing(false);
     }

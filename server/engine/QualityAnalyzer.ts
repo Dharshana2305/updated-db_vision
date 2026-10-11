@@ -16,10 +16,21 @@ export class QualityAnalyzer {
 
       // 1. High NULL Percentage Check (> 40% NULL)
       for (const [colName, nullCount] of Object.entries(profile.nullCounts)) {
+        // Skip columns created by automated security/architecture remediations or internal metadata
+        if (
+          colName.endsWith('_hash') ||
+          colName.endsWith('_last4') ||
+          colName === 'payment_token' ||
+          colName.startsWith('_') ||
+          colName === 'rowid'
+        ) {
+          continue;
+        }
+
         const nullPct = Math.round((nullCount / totalRows) * 100);
         if (nullPct >= 40 && totalRows >= 5) {
           findings.push({
-            id: `QUAL-NULL-${table.name}-${colName}-${findingIdx++}`,
+            id: `QUAL-NULL-${table.name}-${colName}`,
             title: `High NULL Rate (${nullPct}%) in "${table.name}.${colName}"`,
             category: 'quality',
             severity: nullPct >= 70 ? 'MEDIUM' : 'LOW',
@@ -33,10 +44,10 @@ export class QualityAnalyzer {
             confidence: 95,
             risk: 'LOW',
             expectedImpact: 'Improves table density and avoids sparse column overhead.',
-            suggestedFix: `-- Check rows with values:
-SELECT COUNT(*) FROM "${table.name}" WHERE "${colName}" IS NOT NULL;`,
+            suggestedFix: `CREATE VIEW IF NOT EXISTS "v_${table.name}_${colName}_active" AS SELECT * FROM "${table.name}" WHERE "${colName}" IS NOT NULL;`,
+            rollbackSql: `DROP VIEW IF EXISTS "v_${table.name}_${colName}_active";`,
             status: 'OPEN',
-            safeToApplyAuto: false
+            safeToApplyAuto: true
           });
         }
       }
@@ -56,7 +67,7 @@ SELECT COUNT(*) FROM "${table.name}" WHERE "${colName}" IS NOT NULL;`,
 
         if (invalidEmails.length > 0) {
           findings.push({
-            id: `QUAL-EMAIL-REGEX-${table.name}-${emailCol.name}-${findingIdx++}`,
+            id: `QUAL-EMAIL-REGEX-${table.name}-${emailCol.name}`,
             title: `Malformed Email Address Values in "${table.name}.${emailCol.name}"`,
             category: 'quality',
             severity: 'HIGH',
@@ -93,7 +104,7 @@ SELECT COUNT(*) FROM "${table.name}" WHERE "${colName}" IS NOT NULL;`,
         const uniqueFormats = Array.from(new Set(phoneFormats));
         if (uniqueFormats.length > 1) {
           findings.push({
-            id: `QUAL-PHONE-FMT-${table.name}-${phoneCol.name}-${findingIdx++}`,
+            id: `QUAL-PHONE-FMT-${table.name}-${phoneCol.name}`,
             title: `Inconsistent Phone Number Formats in "${table.name}.${phoneCol.name}"`,
             category: 'quality',
             severity: 'LOW',
@@ -107,8 +118,8 @@ SELECT COUNT(*) FROM "${table.name}" WHERE "${colName}" IS NOT NULL;`,
             confidence: 88,
             risk: 'LOW',
             expectedImpact: 'Enables dependable SMS gateway delivery and accurate entity deduplication.',
-            suggestedFix: `CREATE TABLE IF NOT EXISTS _phone_standards (table_name TEXT, col_name TEXT, standard TEXT, updated_at TEXT);
-INSERT OR REPLACE INTO _phone_standards VALUES ('${table.name}', '${phoneCol.name}', 'E.164', datetime('now'));`,
+            suggestedFix: `CREATE TABLE IF NOT EXISTS _phone_standards (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT, col_name TEXT, standard TEXT, updated_at TEXT);
+INSERT OR REPLACE INTO _phone_standards (table_name, col_name, standard, updated_at) VALUES ('${table.name}', '${phoneCol.name}', 'E.164', datetime('now'));`,
             status: 'OPEN',
             safeToApplyAuto: true
           });

@@ -86,6 +86,28 @@ router.post('/projects/:id/sql/benchmark', authenticate, requireProjectOwner, as
     return;
   }
 
+  // Enforce read-only validation on original SQL
+  const originalValidation = validateReadOnlySQL(sql);
+  if (!originalValidation.isSafe) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'SECURITY_BLOCKED', message: `Original query rejected: ${originalValidation.reason}` }
+    });
+    return;
+  }
+
+  // Enforce read-only validation on optimized SQL if provided
+  if (optimizedSql) {
+    const optValidation = validateReadOnlySQL(optimizedSql);
+    if (!optValidation.isSafe) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'SECURITY_BLOCKED', message: `Optimized query rejected: ${optValidation.reason}` }
+      });
+      return;
+    }
+  }
+
   const adapter = AdapterFactory.getActiveAdapter(projectId);
   if (!adapter || !adapter.benchmarkQuery) {
     res.status(400).json({ success: false, error: { code: 'UNSUPPORTED', message: 'Query benchmark is not supported by current adapter or database is disconnected.' } });

@@ -9,6 +9,7 @@ import { SAMPLE_DATABASES } from '../adapters/SampleDatabases.js';
 import { DatabaseConnectionConfig } from '../../src/types.js';
 import { encryptCredential } from '../utils/crypto.ts';
 import { SQLiteAdapter } from '../adapters/SQLiteAdapter.js';
+import { ReviewEngine } from '../engine/ReviewEngine.js';
 
 // Configure upload limits for direct database files up to 150MB
 const upload = multer({
@@ -89,11 +90,35 @@ router.post('/projects/:id/load-sample', authenticate, requireProjectOwner, asyn
     const adapter = await AdapterFactory.createAdapter(projectId, config);
     const testRes = await adapter.testConnection();
 
+    // Reset any previous review and recommendation history for this project so the newly loaded sample is audited fresh
+    store.resetProjectReviewData(projectId);
+
+    let freshReview: any = null;
+    let freshRecommendations: any[] = [];
+    if (testRes.success) {
+      try {
+        const reviewResult = await ReviewEngine.runReview(projectId, adapter, 500, { resetApplied: true });
+        store.createReview(reviewResult.review, false);
+        store.saveRecommendations(projectId, reviewResult.recommendations);
+        freshReview = reviewResult.review;
+        freshRecommendations = reviewResult.recommendations;
+      } catch (revErr) {
+        console.warn('Initial review on load-sample failed:', revErr);
+      }
+    }
+
+    const criticalCount = freshReview?.findings?.filter((f: any) => f.severity === 'CRITICAL')?.length || 0;
+    const openCount = freshReview?.findings?.filter((f: any) => f.status !== 'APPLIED')?.length || 0;
+
     store.updateProject(projectId, {
       databaseType: 'sqlite',
       connectionConfig: config,
       connectionStatus: testRes.success ? 'CONNECTED' : 'ERROR',
-      connectionError: testRes.success ? undefined : testRes.message
+      connectionError: testRes.success ? undefined : testRes.message,
+      lastReviewId: freshReview?.id,
+      latestHealthScore: freshReview?.healthScore,
+      totalFindings: openCount,
+      criticalFindings: criticalCount
     });
 
     store.addAuditLog({
@@ -102,15 +127,17 @@ router.post('/projects/:id/load-sample', authenticate, requireProjectOwner, asyn
       userId: req.user!.id,
       action: 'DATABASE_CONNECTED',
       targetObject: sample.name,
-      details: `Loaded sample database "${sample.name}" with pre-seeded schemas and flaws.`,
+      details: `Loaded sample database "${sample.name}" with pre-seeded schemas and ${openCount} open findings ready for 1-click remediation.`,
       result: 'SUCCESS',
       timestamp: new Date().toISOString()
     });
 
     res.json({
       success: true,
-      message: `Sample database "${sample.name}" loaded successfully!`,
-      testResult: testRes
+      message: `Sample database "${sample.name}" loaded successfully with ${openCount} findings identified!`,
+      testResult: testRes,
+      review: freshReview,
+      recommendations: freshRecommendations
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'SAMPLE_LOAD_FAILED', message: err.message || 'Failed to load sample database' } });

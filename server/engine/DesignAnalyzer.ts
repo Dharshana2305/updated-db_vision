@@ -6,10 +6,28 @@ export class DesignAnalyzer {
     let findingIdx = 1;
 
     for (const table of schema.tables) {
-      // 1. Missing Primary Key Check
-      if (table.primaryKey.length === 0 && table.type === 'table') {
+      // 1. Missing Primary Key Check (Ignore internal governance/system tables and tables with surrogate unique id index)
+      const hasUniqueIdIndex = table.indexes.some(idx =>
+        (idx.isUnique || idx.name.includes('_pk') || idx.name.includes('_id')) &&
+        idx.columns.some(c => c.toLowerCase() === 'id' || c.toLowerCase() === `${table.name.toLowerCase()}_id`)
+      );
+
+      if (
+        table.primaryKey.length === 0 &&
+        !hasUniqueIdIndex &&
+        table.type === 'table' &&
+        !table.name.startsWith('_') &&
+        !table.name.startsWith('sqlite_')
+      ) {
+        const hasIdCol = table.columns.some(c => c.name.toLowerCase() === 'id');
+        const fixSql = hasIdCol
+          ? `CREATE UNIQUE INDEX IF NOT EXISTS "idx_${table.name}_id" ON "${table.name}" (id);`
+          : `ALTER TABLE "${table.name}" ADD COLUMN id INTEGER;
+UPDATE "${table.name}" SET id = rowid WHERE id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_${table.name}_id" ON "${table.name}" (id);`;
+
         findings.push({
-          id: `DES-NO-PK-${table.name}-${findingIdx++}`,
+          id: `DES-NO-PK-${table.name}`,
           title: `Table "${table.name}" Lacks a Primary Key`,
           category: 'structure',
           severity: 'CRITICAL',
@@ -22,10 +40,10 @@ export class DesignAnalyzer {
           confidence: 100,
           risk: 'MEDIUM',
           expectedImpact: 'Guarantees entity uniqueness and allows foreign key reference integrity.',
-          suggestedFix: `ALTER TABLE "${table.name}" ADD COLUMN id INTEGER PRIMARY KEY AUTOINCREMENT;`,
-          rollbackSql: `-- Note: Dropping auto-increment PK in SQLite requires table re-creation`,
+          suggestedFix: fixSql,
+          rollbackSql: `DROP INDEX IF EXISTS "idx_${table.name}_id";`,
           status: 'OPEN',
-          safeToApplyAuto: false
+          safeToApplyAuto: true
         });
       }
 
@@ -40,7 +58,7 @@ export class DesignAnalyzer {
           colLower.includes('comma_separated')
         ) {
           findings.push({
-            id: `DES-1NF-MULTI-${table.name}-${col.name}-${findingIdx++}`,
+            id: `DES-1NF-MULTI-${table.name}-${col.name}`,
             title: `Potential 1NF Violation (Multi-Valued Attribute) in "${table.name}.${col.name}"`,
             category: 'structure',
             severity: 'MEDIUM',
@@ -55,7 +73,7 @@ export class DesignAnalyzer {
             risk: 'MEDIUM',
             expectedImpact: 'Enables exact index lookups, clean relational queries, and simplifies reporting.',
             suggestedFix: `-- Recommended Schema Normalization:
-CREATE TABLE "${table.name}_${col.name}" (
+CREATE TABLE IF NOT EXISTS "${table.name}_${col.name}" (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   "${table.name}_id" INTEGER NOT NULL,
   value VARCHAR(100) NOT NULL,
@@ -71,7 +89,7 @@ CREATE TABLE "${table.name}_${col.name}" (
       const colNames = table.columns.map(c => c.name.toLowerCase());
       if (colNames.includes('subtotal') && colNames.includes('quantity') && colNames.includes('unit_price')) {
         findings.push({
-          id: `DES-3NF-DERIVED-${table.name}-subtotal-${findingIdx++}`,
+          id: `DES-3NF-DERIVED-${table.name}-subtotal`,
           title: `Derived / Redundant Column "subtotal" in "${table.name}"`,
           category: 'structure',
           severity: 'LOW',
@@ -109,7 +127,7 @@ CREATE TABLE "${table.name}_${col.name}" (
             if (matchingTable && matchingTable.name !== table.name) {
               const confidence = matchingTable.primaryKey.length > 0 ? 88 : 72;
               findings.push({
-                id: `DES-INFERRED-FK-${table.name}-${col.name}-${findingIdx++}`,
+                id: `DES-INFERRED-FK-${table.name}-${col.name}`,
                 title: `Inferred Relationship: "${table.name}.${col.name}" → "${matchingTable.name}"`,
                 category: 'relationships',
                 severity: 'MEDIUM',

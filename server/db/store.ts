@@ -1,6 +1,24 @@
 import fs from 'fs';
 import path from 'path';
-import { User, Project, Review, Finding, RecommendationItem, AuditLog, ChatMessage, AppSettings } from '../../src/types.js';
+import { User, Project, Review, Finding, RecommendationItem, AuditLog, ChatMessage, AppSettings, RepairJob, AutoRepairPolicy } from '../../src/types.js';
+import { HealthScorer } from '../engine/HealthScorer.js';
+
+export interface StoredOTP {
+  email: string;
+  hashedOtp: string;
+  createdAt: number;
+  expiresAt: number;
+  attempts: number;
+  lastResentAt: number;
+  resendCount?: number;
+}
+
+export interface PasswordResetToken {
+  email: string;
+  hashedToken: string;
+  expiresAt: number;
+  used: boolean;
+}
 
 interface DatabaseData {
   users: User[];
@@ -12,10 +30,15 @@ interface DatabaseData {
   auditLogs: AuditLog[];
   chatMessages: Record<string, ChatMessage[]>; // projectId -> messages
   settings: AppSettings;
+  repairJobs: RepairJob[];
+  repairPolicies: Record<string, AutoRepairPolicy>; // projectId -> policy
+  otpStore: Record<string, StoredOTP>; // email -> OTP
+  resetTokens: PasswordResetToken[];
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_BAK_FILE = path.join(DATA_DIR, 'db.json.bak');
 
 const defaultSettings: AppSettings = {
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
@@ -24,7 +47,8 @@ const defaultSettings: AppSettings = {
   maskPIIBeforeAI: true,
   maxProfileRows: Number(process.env.MAX_PROFILE_ROWS) || 500,
   theme: 'dark',
-  activeAIProvider: process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'
+  activeAIProvider: process.env.GEMINI_API_KEY ? 'gemini' : 'ollama',
+  globalAutoRepairEmergencyStop: false
 };
 
 class Store {
@@ -37,7 +61,11 @@ class Store {
     recommendations: [],
     auditLogs: [],
     chatMessages: {},
-    settings: defaultSettings
+    settings: defaultSettings,
+    repairJobs: [],
+    repairPolicies: {},
+    otpStore: {},
+    resetTokens: []
   };
   private isLoaded = false;
 
@@ -51,13 +79,36 @@ class Store {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
       if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        const parsed = JSON.parse(raw);
-        this.data = {
-          ...this.data,
-          ...parsed,
-          settings: { ...defaultSettings, ...(parsed.settings || {}) }
-        };
+        try {
+          const raw = fs.readFileSync(DB_FILE, 'utf-8');
+          const parsed = JSON.parse(raw);
+          this.data = {
+            ...this.data,
+            ...parsed,
+            settings: { ...defaultSettings, ...(parsed.settings || {}) },
+            repairJobs: Array.isArray(parsed.repairJobs) ? parsed.repairJobs : [],
+            repairPolicies: parsed.repairPolicies || {},
+            otpStore: parsed.otpStore || {},
+            resetTokens: Array.isArray(parsed.resetTokens) ? parsed.resetTokens : []
+          };
+        } catch (parseErr) {
+          console.warn('Primary db.json corrupted, checking db.json.bak for recovery:', parseErr);
+          if (fs.existsSync(DB_BAK_FILE)) {
+            const bakRaw = fs.readFileSync(DB_BAK_FILE, 'utf-8');
+            const bakParsed = JSON.parse(bakRaw);
+            this.data = {
+              ...this.data,
+              ...bakParsed,
+              settings: { ...defaultSettings, ...(bakParsed.settings || {}) },
+              repairJobs: Array.isArray(bakParsed.repairJobs) ? bakParsed.repairJobs : [],
+              repairPolicies: bakParsed.repairPolicies || {},
+              otpStore: bakParsed.otpStore || {},
+              resetTokens: Array.isArray(bakParsed.resetTokens) ? bakParsed.resetTokens : []
+            };
+            // Restore primary from valid backup
+            this.save();
+          }
+        }
       } else {
         this.save();
       }
@@ -74,10 +125,25 @@ class Store {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
       const tempPath = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf-8');
+      const jsonContent = JSON.stringify(this.data, null, 2);
+
+      // Verify serialization output is valid before writing
+      JSON.parse(jsonContent);
+
+      fs.writeFileSync(tempPath, jsonContent, 'utf-8');
+
+      // Maintain a valid backup file before replacing primary
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          fs.copyFileSync(DB_FILE, DB_BAK_FILE);
+        } catch {
+          // Non-fatal backup copy
+        }
+      }
+
       fs.renameSync(tempPath, DB_FILE);
     } catch (err) {
-      console.error('Failed to save to db.json:', err);
+      console.error('Failed to safely save db.json:', err);
     }
   }
 
@@ -145,6 +211,13 @@ class Store {
   }
 
   // Reviews
+  resetProjectReviewData(projectId: string): void {
+    this.data.reviews = this.data.reviews.filter(r => r.projectId !== projectId);
+    this.data.recommendations = this.data.recommendations.filter(r => r.projectId !== projectId);
+    this.data.findings = this.data.findings.filter(f => !f.id.startsWith(projectId));
+    this.save();
+  }
+
   getReviews(projectId: string): Review[] {
     return this.data.reviews.filter(r => r.projectId === projectId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -153,18 +226,48 @@ class Store {
     return this.data.reviews.find(r => r.id === id);
   }
 
-  createReview(review: Review): Review {
-    // Preserve any findings already applied in this project
-    const existingRecs = this.getRecommendations(review.projectId);
-    const appliedFindingIds = new Set(
-      existingRecs.filter(r => r.status === 'APPLIED').map(r => r.findingId)
-    );
+  createReview(review: Review, preserveApplied = true): Review {
+    // Preserve any findings already applied in this project if requested
+    if (preserveApplied) {
+      const existingRecs = this.getRecommendations(review.projectId);
+      const projectReviews = this.getReviews(review.projectId);
 
-    review.findings.forEach(f => {
-      if (appliedFindingIds.has(f.id) || appliedFindingIds.has(`REC-${f.id}`)) {
-        f.status = 'APPLIED';
+      const appliedIds = new Set<string>();
+      for (const rev of projectReviews) {
+        rev.findings.filter(f => f.status === 'APPLIED').forEach(f => {
+          appliedIds.add(f.id);
+          appliedIds.add(f.id.replace(/-[0-9]+$/, ''));
+        });
       }
-    });
+      existingRecs.filter(r => r.status === 'APPLIED').forEach(r => {
+        appliedIds.add(r.id);
+        appliedIds.add(r.id.replace('REC-', ''));
+        appliedIds.add(r.id.replace(/-[0-9]+$/, ''));
+        appliedIds.add(r.findingId);
+        appliedIds.add(r.findingId.replace(/-[0-9]+$/, ''));
+      });
+
+      let hasStatusChanges = false;
+      review.findings.forEach(f => {
+        const cleanId = f.id.replace(/-[0-9]+$/, '');
+        if (
+          appliedIds.has(f.id) ||
+          appliedIds.has(cleanId) ||
+          appliedIds.has(`REC-${f.id}`) ||
+          appliedIds.has(`REC-${cleanId}`)
+        ) {
+          if (f.status !== 'APPLIED') {
+            f.status = 'APPLIED';
+            hasStatusChanges = true;
+          }
+        }
+      });
+
+      // If applied findings were carried forward, re-evaluate health score
+      if (hasStatusChanges) {
+        review.healthScore = HealthScorer.calculate(review.findings);
+      }
+    }
 
     this.data.reviews.unshift(review);
     // Add findings
@@ -187,18 +290,23 @@ class Store {
 
   updateFinding(findingId: string, updates: Partial<Finding>): Finding | undefined {
     let found: Finding | undefined;
+    const cleanId = findingId.replace(/-[0-9]+$/, '');
     // Update in all matching reviews for this finding, so historical and current reviews stay synchronized
     for (const rev of this.data.reviews) {
-      const idx = rev.findings.findIndex(f => f.id === findingId);
-      if (idx !== -1) {
-        rev.findings[idx] = { ...rev.findings[idx], ...updates };
-        found = rev.findings[idx];
+      for (let i = 0; i < rev.findings.length; i++) {
+        const f = rev.findings[i];
+        if (f.id === findingId || f.id === cleanId || f.id.replace(/-[0-9]+$/, '') === cleanId) {
+          rev.findings[i] = { ...rev.findings[i], ...updates };
+          found = rev.findings[i];
+        }
       }
     }
-    const gIdx = this.data.findings.findIndex(f => f.id === findingId);
-    if (gIdx !== -1) {
-      this.data.findings[gIdx] = { ...this.data.findings[gIdx], ...updates };
-      found = this.data.findings[gIdx];
+    for (let i = 0; i < this.data.findings.length; i++) {
+      const f = this.data.findings[i];
+      if (f.id === findingId || f.id === cleanId || f.id.replace(/-[0-9]+$/, '') === cleanId) {
+        this.data.findings[i] = { ...this.data.findings[i], ...updates };
+        found = this.data.findings[i];
+      }
     }
     if (found) this.save();
     return found;
@@ -210,17 +318,49 @@ class Store {
   }
 
   saveRecommendations(projectId: string, recs: RecommendationItem[]): void {
+    // Preserve any existing recommendations that are already APPLIED
+    const existing = this.data.recommendations.filter(r => r.projectId === projectId);
+    const existingApplied = new Map<string, RecommendationItem>();
+    existing.forEach(r => {
+      if (r.status === 'APPLIED') {
+        existingApplied.set(r.id, r);
+        existingApplied.set(r.id.replace('REC-', ''), r);
+        existingApplied.set(r.id.replace(/-[0-9]+$/, ''), r);
+        existingApplied.set(r.findingId, r);
+        existingApplied.set(r.findingId.replace(/-[0-9]+$/, ''), r);
+      }
+    });
+
+    const mergedRecs = recs.map(rec => {
+      const cleanFindingId = rec.findingId.replace(/-[0-9]+$/, '');
+      const cleanRecId = rec.id.replace(/-[0-9]+$/, '');
+      const alreadyApplied = existingApplied.get(rec.id) || existingApplied.get(cleanRecId) || existingApplied.get(rec.findingId) || existingApplied.get(cleanFindingId);
+      if (alreadyApplied) {
+        return {
+          ...rec,
+          status: 'APPLIED' as const,
+          appliedAt: alreadyApplied.appliedAt || rec.appliedAt || new Date().toISOString(),
+          appliedResult: alreadyApplied.appliedResult || rec.appliedResult || 'Remediation applied'
+        };
+      }
+      return rec;
+    });
+
     this.data.recommendations = [
-      ...recs,
-      ...this.data.recommendations.filter(r => !recs.some(nr => nr.id === r.id))
+      ...mergedRecs,
+      ...this.data.recommendations.filter(r => r.projectId !== projectId)
     ];
     this.save();
   }
 
   updateRecommendation(id: string, updates: Partial<RecommendationItem>): RecommendationItem | undefined {
-    const rec = this.data.recommendations.find(r => r.id === id);
+    const cleanId = id.replace(/-[0-9]+$/, '');
+    const rec = this.data.recommendations.find(r => r.id === id || r.id === cleanId || r.id.replace(/-[0-9]+$/, '') === cleanId);
     if (!rec) return undefined;
     Object.assign(rec, updates);
+    if (updates.status === 'APPLIED' && rec.findingId) {
+      this.updateFinding(rec.findingId, { status: 'APPLIED' });
+    }
     this.save();
     return rec;
   }

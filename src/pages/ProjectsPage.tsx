@@ -39,19 +39,17 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigateToTab }) =
       setDescription('');
       setShowModal(false);
     } catch (err: any) {
-      alert(`Project creation failed: ${err.message}`);
+      console.error(`Project creation failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete project "${name}"?`)) {
-      try {
-        await deleteProject(id);
-      } catch (err: any) {
-        alert(`Delete failed: ${err.message}`);
-      }
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteProject(id);
+    } catch (err: any) {
+      console.error(`Delete failed: ${err.message}`);
     }
   };
 
@@ -134,7 +132,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigateToTab }) =
                   </button>
 
                   <button
-                    onClick={() => handleDelete(p.id, p.name)}
+                    onClick={() => handleDelete(p.id)}
                     className="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors"
                     title="Delete Project"
                   >

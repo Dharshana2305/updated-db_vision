@@ -57,8 +57,9 @@ export class HealthScorer {
       maintainability: { total: 0, critical: 0 }
     };
 
-    // Calculate deductions
+    // Calculate deductions only for active/open issues (do not penalize applied/fixed flaws)
     findings.forEach(f => {
+      if (f.status === 'APPLIED') return;
       const cat = f.category;
       if (categoryScores[cat] !== undefined) {
         categoryIssues[cat].total++;

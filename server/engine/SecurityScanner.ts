@@ -18,7 +18,7 @@ export class SecurityScanner {
           colLower === 'passwd'
         ) {
           findings.push({
-            id: `SEC-PW-${table.name}-${col.name}-${findingIdx++}`,
+            id: `SEC-PW-${table.name}-${col.name}`,
             title: `Potential Plaintext Password Column in "${table.name}"`,
             category: 'security',
             severity: 'CRITICAL',
@@ -51,7 +51,7 @@ ALTER TABLE "${table.name}" ADD COLUMN "${col.name}_hash" VARCHAR(255);
           colLower === 'pan'
         ) {
           findings.push({
-            id: `SEC-PCI-${table.name}-${col.name}-${findingIdx++}`,
+            id: `SEC-PCI-${table.name}-${col.name}`,
             title: `Direct Payment Card / CVV Storage in "${table.name}"`,
             category: 'security',
             severity: 'CRITICAL',
@@ -83,7 +83,7 @@ ALTER TABLE "${table.name}" ADD COLUMN payment_token VARCHAR(100);
           colLower === 'tax_id'
         ) {
           findings.push({
-            id: `SEC-PII-${table.name}-${col.name}-${findingIdx++}`,
+            id: `SEC-PII-${table.name}-${col.name}`,
             title: `Unencrypted Government Identity Number (PII) in "${table.name}"`,
             category: 'security',
             severity: 'HIGH',
@@ -107,7 +107,7 @@ ALTER TABLE "${table.name}" ADD COLUMN "${col.name}_last4" VARCHAR(4);`,
         // 4. Contact PII (Phone & Email) in Public Tables
         if (colLower === 'phone_number' || colLower === 'phone' || colLower === 'mobile') {
           findings.push({
-            id: `SEC-PHONE-${table.name}-${col.name}-${findingIdx++}`,
+            id: `SEC-PHONE-${table.name}-${col.name}`,
             title: `Direct Phone Number PII in "${table.name}"`,
             category: 'security',
             severity: 'LOW',

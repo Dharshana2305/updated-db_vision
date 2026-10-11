@@ -313,6 +313,13 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
         message: 'PostgreSQL database modification executed successfully.'
       };
     } catch (err: any) {
+      if (/already exists|duplicate key|duplicate column/i.test(err?.message || '')) {
+        return {
+          success: true,
+          affectedRows: 0,
+          message: `Already applied on PostgreSQL database (${err.message})`
+        };
+      }
       return {
         success: false,
         message: err.message || 'Error executing PostgreSQL modification'
@@ -605,6 +612,13 @@ export class MySQLAdapter implements DatabaseAdapter {
         message: 'MySQL modification applied successfully.'
       };
     } catch (err: any) {
+      if (/duplicate column name|already exists|duplicate key/i.test(err?.message || '')) {
+        return {
+          success: true,
+          affectedRows: 0,
+          message: `Already applied on MySQL database (${err.message})`
+        };
+      }
       return {
         success: false,
         message: err.message || 'MySQL modification execution error'

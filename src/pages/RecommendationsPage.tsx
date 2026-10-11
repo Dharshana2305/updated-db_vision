@@ -32,6 +32,7 @@ export const RecommendationsPage: React.FC = () => {
   const [isBulkFixing, setIsBulkFixing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [downloadDropdown, setDownloadDropdown] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [justFixedAll, setJustFixedAll] = useState(false);
@@ -85,11 +86,6 @@ export const RecommendationsPage: React.FC = () => {
 
   const handleApproveAll = async () => {
     if (!activeProject || isBulkApproving) return;
-    if (pendingRecs.length === 0) return;
-
-    if (!confirm(`Are you sure you want to approve all ${pendingRecs.length} pending recommendations in one click?`)) {
-      return;
-    }
 
     setIsBulkApproving(true);
     setActionMessage(null);
@@ -97,12 +93,14 @@ export const RecommendationsPage: React.FC = () => {
 
     try {
       const res = await api.approveAllRecommendations(activeProject.id);
-      setActionMessage(`Successfully approved all ${res.count} recommendations in one click!`);
+      setActionMessage(res.message || `Successfully approved & applied ${res.count || 'all'} recommendations in one click!`);
+      setJustFixedAll(true);
       await refreshReviewData();
+      await refreshSchema();
       loadAuditLogs(selectedAuditDbKey);
       setTimeout(() => setActionMessage(null), 6000);
     } catch (err: any) {
-      setActionError(`Bulk approval failed: ${err.message}`);
+      setActionError(`Approval execution failed: ${err.message}`);
     } finally {
       setIsBulkApproving(false);
     }
@@ -110,11 +108,6 @@ export const RecommendationsPage: React.FC = () => {
 
   const handleFixAllFlaws = async () => {
     if (!activeProject || isBulkFixing) return;
-    const countToFix = pendingRecs.length + recommendations.filter(r => r.status === 'APPROVED').length;
-
-    if (!confirm(`Apply all ${countToFix} findings & flaw fixes directly to the database in one click? This will execute all safe remediation scripts and recalculate health scores.`)) {
-      return;
-    }
 
     setIsBulkFixing(true);
     setActionMessage(null);
@@ -122,15 +115,38 @@ export const RecommendationsPage: React.FC = () => {
 
     try {
       const res = await api.fixAllFindingsAndFlaws(activeProject.id);
-      setActionMessage(res.message);
+      setActionMessage(res.message || 'All findings and flaws successfully remediated!');
       setJustFixedAll(true);
       await refreshReviewData();
       await refreshSchema();
       loadAuditLogs(selectedAuditDbKey);
+      setTimeout(() => setActionMessage(null), 6000);
     } catch (err: any) {
       setActionError(`1-Click Fix failed: ${err.message}`);
     } finally {
       setIsBulkFixing(false);
+    }
+  };
+
+  const handleResetAudit = async () => {
+    if (!activeProject || isResetting) return;
+
+    setIsResetting(true);
+    setActionMessage(null);
+    setActionError(null);
+
+    try {
+      const res = await api.resetAudit(activeProject.id);
+      setActionMessage(res.message || 'Audit successfully reset! Flaws are now re-opened for testing.');
+      setJustFixedAll(false);
+      await refreshReviewData();
+      await refreshSchema();
+      loadAuditLogs(selectedAuditDbKey);
+      setTimeout(() => setActionMessage(null), 6000);
+    } catch (err: any) {
+      setActionError(`Reset audit failed: ${err.message}`);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -188,8 +204,9 @@ export const RecommendationsPage: React.FC = () => {
 
   const pendingRecs = recommendations.filter(r => r.status === 'PENDING');
   const approvedRecs = recommendations.filter(r => r.status === 'APPROVED');
+  const awaitingRecs = recommendations.filter(r => r.status !== 'APPLIED' && r.status !== 'REJECTED');
   const appliedRecs = recommendations.filter(r => r.status === 'APPLIED');
-  const otherRecs = recommendations.filter(r => r.status === 'REJECTED' || r.status === 'ROLLED_BACK');
+  const otherRecs = recommendations.filter(r => r.status === 'REJECTED');
 
   const activeDbName =
     schema?.databaseName ||
@@ -292,37 +309,44 @@ export const RecommendationsPage: React.FC = () => {
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                {pendingRecs.length} pending recommendations and open flaws can be approved and remediated across <strong>{activeDbName}</strong> in a single click.
+                {awaitingRecs.length} pending recommendations and open flaws can be approved and remediated across <strong>{activeDbName}</strong> in a single click.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Reset / Re-audit Flaws */}
+            <button
+              onClick={handleResetAudit}
+              disabled={isResetting || isBulkApproving || isBulkFixing}
+              className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-400 border border-sky-500/30 text-xs font-semibold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Reset flaws to re-test the 1-click remediation suite"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+              <span>{isResetting ? 'Resetting...' : 'Reset Flaws'}</span>
+            </button>
+
             {/* 1-Click Approve All */}
-            {pendingRecs.length > 0 && (
-              <button
-                onClick={handleApproveAll}
-                disabled={isBulkApproving || isBulkFixing}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                title="Approve all pending recommendations in one click"
-              >
-                <CheckCheck className="w-4 h-4" />
-                <span>{isBulkApproving ? 'Approving...' : `Approve All (${pendingRecs.length})`}</span>
-              </button>
-            )}
+            <button
+              onClick={handleApproveAll}
+              disabled={isBulkApproving || isBulkFixing || isResetting}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Approve and apply all recommendations in one click"
+            >
+              <CheckCheck className="w-4 h-4" />
+              <span>{isBulkApproving ? 'Approving & Applying...' : awaitingRecs.length > 0 ? `Approve & Apply All (${awaitingRecs.length})` : 'Approve & Re-verify All'}</span>
+            </button>
 
             {/* 1-Click Fix All Findings & Flaws */}
-            {(pendingRecs.length > 0 || approvedRecs.length > 0) && (
-              <button
-                onClick={handleFixAllFlaws}
-                disabled={isBulkFixing || isBulkApproving}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 text-white text-xs font-bold transition-all shadow-lg hover:shadow-sky-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                title="Execute all safe fixes and flaw remediations in one click"
-              >
-                <Wand2 className="w-4 h-4" />
-                <span>{isBulkFixing ? 'Fixing All Flaws...' : `Fix All Findings & Flaws (${pendingRecs.length + approvedRecs.length})`}</span>
-              </button>
-            )}
+            <button
+              onClick={handleFixAllFlaws}
+              disabled={isBulkFixing || isBulkApproving || isResetting}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 text-white text-xs font-bold transition-all shadow-lg hover:shadow-sky-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              title="Execute all safe fixes and flaw remediations in one click"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>{isBulkFixing ? 'Fixing All Flaws...' : awaitingRecs.length > 0 ? `Fix All Findings & Flaws (${awaitingRecs.length})` : 'Fix & Re-check All'}</span>
+            </button>
           </div>
         </div>
       )}
@@ -349,7 +373,7 @@ export const RecommendationsPage: React.FC = () => {
             </button>
             <button
               onClick={() => handleDownloadUpdatedFile('sql')}
-              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <FileCode className="w-3.5 h-3.5" />
               <span>Download .sql Script</span>
@@ -380,31 +404,45 @@ export const RecommendationsPage: React.FC = () => {
 
       {activeTab === 'recommendations' ? (
         <div className="space-y-6">
-          {/* Pending Section */}
+          {/* Pending / Approved Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                Awaiting Approval ({pendingRecs.length})
+                Awaiting Remediation ({awaitingRecs.length})
               </h3>
-              {pendingRecs.length > 1 && (
+              {awaitingRecs.length > 1 && (
                 <button
                   onClick={handleApproveAll}
                   disabled={isBulkApproving}
                   className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                 >
                   <CheckCheck className="w-3.5 h-3.5" />
-                  <span>Approve all in one click</span>
+                  <span>Approve &amp; apply all in one click</span>
                 </button>
               )}
             </div>
 
-            {pendingRecs.length === 0 ? (
-              <div className="p-8 text-center bg-slate-900/40 border border-slate-800 rounded-xl text-slate-500 text-xs">
-                No pending recommendations awaiting review. All current flaws are approved or applied!
+            {awaitingRecs.length === 0 ? (
+              <div className="p-8 text-center bg-slate-900/40 border border-slate-800 rounded-2xl text-slate-400 text-xs space-y-3">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+                <div>
+                  <div className="font-bold text-slate-200 text-sm">All Recommendations &amp; Flaws Remediated!</div>
+                  <div className="text-slate-400 text-xs mt-1 max-w-md mx-auto">
+                    Your database has 0 pending flaws. You can download the hardened database file above, or reset the audit below to re-test the 1-Click Autonomous Remediation Suite.
+                  </div>
+                </div>
+                <button
+                  onClick={handleResetAudit}
+                  disabled={isResetting}
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-md transition-colors"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+                  <span>{isResetting ? 'Resetting Audit...' : 'Re-open Flaws to Test 1-Click Fixes'}</span>
+                </button>
               </div>
             ) : (
-              pendingRecs.map(rec => (
+              awaitingRecs.map(rec => (
                 <div
                   key={rec.id}
                   className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm"
@@ -412,12 +450,23 @@ export const RecommendationsPage: React.FC = () => {
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 uppercase">
-                          Risk: {rec.risk}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
+                          rec.status === 'APPROVED'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : rec.status === 'FAILED'
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                        }`}>
+                          {rec.status === 'APPROVED' ? 'Approved' : rec.status === 'FAILED' ? 'Failed - Retry Ready' : `Risk: ${rec.risk}`}
                         </span>
                         <h4 className="font-bold text-slate-100 text-sm">{rec.title}</h4>
                       </div>
                       <p className="text-xs text-slate-300 mt-1 leading-relaxed">{rec.problem}</p>
+                      {rec.errorMessage && (
+                        <div className="mt-2 text-[11px] font-mono text-rose-300 bg-rose-950/40 border border-rose-800/40 rounded px-2.5 py-1">
+                          Previous execution: {rec.errorMessage}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -436,7 +485,7 @@ export const RecommendationsPage: React.FC = () => {
                         className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>{processingId === rec.id ? 'Applying...' : 'Approve & Apply'}</span>
+                        <span>{processingId === rec.id ? 'Applying...' : rec.status === 'FAILED' ? 'Retry & Apply' : 'Approve & Apply'}</span>
                       </button>
                     </div>
                   </div>
