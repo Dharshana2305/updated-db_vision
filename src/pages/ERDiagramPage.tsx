@@ -11,7 +11,7 @@ export const ERDiagramPage: React.FC = () => {
       <div className="p-12 text-center text-slate-500 space-y-3">
         <Database className="w-12 h-12 mx-auto text-slate-700" />
         <h3 className="text-base font-semibold text-slate-300">Database Schema Not Available</h3>
-        <p className="text-xs">Please connect to a database or load a prepackaged sample database first.</p>
+        <p className="text-xs">Please connect your workspace to a database (.sql, .db, .sqlite, .sqlite3, or live server) first.</p>
       </div>
     );
   }

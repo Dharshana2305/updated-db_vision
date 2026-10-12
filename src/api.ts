@@ -115,9 +115,14 @@ export const api = {
     }),
 
   connectDatabase: (projectId: string, config: DatabaseConnectionConfig) =>
-    request<{ success: boolean; testResult: any }>(`/projects/${projectId}/connection`, {
+    request<{ success: boolean; testResult: any; message?: string }>(`/projects/${projectId}/connection`, {
       method: 'POST',
       body: JSON.stringify(config)
+    }),
+
+  disconnectDatabase: (projectId: string) =>
+    request<{ success: boolean; message: string }>(`/projects/${projectId}/disconnect`, {
+      method: 'POST'
     }),
 
   uploadDatabaseFile: async (

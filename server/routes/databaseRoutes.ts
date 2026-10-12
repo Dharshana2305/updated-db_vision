@@ -166,20 +166,88 @@ router.post('/projects/:id/connection', authenticate, requireProjectOwner, async
     const adapter = await AdapterFactory.createAdapter(projectId, config);
     const testResult = await adapter.testConnection();
 
+    // Reset previous review history so fresh analysis runs on this database
+    store.resetProjectReviewData(projectId);
+
+    let freshReview: any = null;
+    let freshRecommendations: any[] = [];
+    if (testResult.success) {
+      try {
+        const reviewResult = await ReviewEngine.runReview(projectId, adapter, 500, { resetApplied: true });
+        store.createReview(reviewResult.review, false);
+        store.saveRecommendations(projectId, reviewResult.recommendations);
+        freshReview = reviewResult.review;
+        freshRecommendations = reviewResult.recommendations;
+      } catch (revErr) {
+        console.warn('Initial review on server connect failed:', revErr);
+      }
+    }
+
+    const openCount = freshReview?.findings?.filter((f: any) => f.status !== 'APPLIED')?.length || 0;
+    const criticalCount = freshReview?.findings?.filter((f: any) => f.severity === 'CRITICAL')?.length || 0;
+
     store.updateProject(projectId, {
       databaseType: config.type,
       connectionConfig: secureConfig,
       connectionStatus: testResult.success ? 'CONNECTED' : 'ERROR',
-      connectionError: testResult.success ? undefined : testResult.message
+      connectionError: testResult.success ? undefined : testResult.message,
+      lastReviewId: freshReview?.id,
+      latestHealthScore: freshReview?.healthScore,
+      totalFindings: openCount,
+      criticalFindings: criticalCount
     });
 
-    res.json({ success: testResult.success, testResult });
+    store.addAuditLog({
+      id: `LOG-${Date.now()}`,
+      projectId,
+      userId: req.user!.id,
+      action: 'DATABASE_CONNECTED',
+      targetObject: `${config.type.toUpperCase()}:${config.database || config.databaseName || 'default'}`,
+      details: `Connected workspace to ${config.type.toUpperCase()} server at ${config.host || 'remote'}:${config.port || 'default'}/${config.database || config.databaseName || ''}`,
+      result: testResult.success ? 'SUCCESS' : 'FAILURE',
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({
+      success: testResult.success,
+      testResult,
+      message: testResult.success
+        ? `Successfully connected workspace to ${config.type.toUpperCase()} database!`
+        : `Connection test failed: ${testResult.message}`,
+      review: freshReview,
+      recommendations: freshRecommendations
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'CONNECTION_FAILED', message: err.message || 'Connection failed' } });
   }
 });
 
-// Upload .sql or .sqlite file
+// Disconnect database from project
+router.post('/projects/:id/disconnect', authenticate, requireProjectOwner, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const projectId = req.params.id;
+  try {
+    AdapterFactory.removeAdapter(projectId);
+    store.updateProject(projectId, {
+      connectionStatus: 'DISCONNECTED',
+      connectionError: undefined
+    });
+    store.addAuditLog({
+      id: `LOG-${Date.now()}`,
+      projectId,
+      userId: req.user!.id,
+      action: 'SCHEMA_MODIFIED',
+      targetObject: 'Database Connection',
+      details: 'Disconnected active database connection from workspace.',
+      result: 'SUCCESS',
+      timestamp: new Date().toISOString()
+    });
+    res.json({ success: true, message: 'Database disconnected successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DISCONNECT_FAILED', message: err.message } });
+  }
+});
+
+// Upload .sql, .db, .sqlite, or .sqlite3 file
 router.post('/projects/:id/upload', authenticate, requireProjectOwner, uploadSingleFile, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const projectId = req.params.id;
 
@@ -194,7 +262,10 @@ router.post('/projects/:id/upload', authenticate, requireProjectOwner, uploadSin
     const isSqlite = filename.endsWith('.sqlite') || filename.endsWith('.db') || filename.endsWith('.sqlite3');
 
     if (!isSql && !isSqlite) {
-      res.status(400).json({ success: false, error: { code: 'INVALID_FILE_TYPE', message: 'Supported file types are .sql DDL scripts or .sqlite / .db database files.' } });
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_FILE_TYPE', message: 'Supported file types are .sql DDL scripts or .sqlite, .db, .sqlite3 database files.' }
+      });
       return;
     }
 
@@ -216,11 +287,35 @@ router.post('/projects/:id/upload', authenticate, requireProjectOwner, uploadSin
     const adapter = await AdapterFactory.createAdapter(projectId, config, req.file.buffer);
     const testResult = await adapter.testConnection();
 
+    // Reset previous review history so fresh analysis runs on uploaded database
+    store.resetProjectReviewData(projectId);
+
+    let freshReview: any = null;
+    let freshRecommendations: any[] = [];
+    if (testResult.success) {
+      try {
+        const reviewResult = await ReviewEngine.runReview(projectId, adapter, 500, { resetApplied: true });
+        store.createReview(reviewResult.review, false);
+        store.saveRecommendations(projectId, reviewResult.recommendations);
+        freshReview = reviewResult.review;
+        freshRecommendations = reviewResult.recommendations;
+      } catch (revErr) {
+        console.warn('Initial review on file upload failed:', revErr);
+      }
+    }
+
+    const openCount = freshReview?.findings?.filter((f: any) => f.status !== 'APPLIED')?.length || 0;
+    const criticalCount = freshReview?.findings?.filter((f: any) => f.severity === 'CRITICAL')?.length || 0;
+
     store.updateProject(projectId, {
       databaseType: 'sqlite',
       connectionConfig: config,
       connectionStatus: testResult.success ? 'CONNECTED' : 'ERROR',
-      connectionError: testResult.success ? undefined : testResult.message
+      connectionError: testResult.success ? undefined : testResult.message,
+      lastReviewId: freshReview?.id,
+      latestHealthScore: freshReview?.healthScore,
+      totalFindings: openCount,
+      criticalFindings: criticalCount
     });
 
     store.addAuditLog({
@@ -229,15 +324,17 @@ router.post('/projects/:id/upload', authenticate, requireProjectOwner, uploadSin
       userId: req.user!.id,
       action: 'DATABASE_CONNECTED',
       targetObject: filename,
-      details: `Imported database file "${filename}" (${Math.round(req.file.size / 1024)} KB)`,
-      result: 'SUCCESS',
+      details: `Imported database file "${filename}" (${Math.round(req.file.size / 1024)} KB) and completed initial audit (${openCount} findings)`,
+      result: testResult.success ? 'SUCCESS' : 'FAILURE',
       timestamp: new Date().toISOString()
     });
 
     res.json({
       success: true,
-      message: `File "${filename}" imported successfully!`,
-      testResult
+      message: `File "${filename}" imported and connected to workspace successfully!`,
+      testResult,
+      review: freshReview,
+      recommendations: freshRecommendations
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'UPLOAD_FAILED', message: err.message || 'File import failed' } });
@@ -276,7 +373,7 @@ router.post('/projects/:id/upload-chunk', authenticate, requireProjectOwner, upl
   const isSqlite = filename.endsWith('.sqlite') || filename.endsWith('.db') || filename.endsWith('.sqlite3');
 
   if (!isSql && !isSqlite) {
-    res.status(400).json({ success: false, error: { code: 'INVALID_FILE_TYPE', message: 'Supported file types are .sql DDL scripts or .sqlite / .db database files.' } });
+    res.status(400).json({ success: false, error: { code: 'INVALID_FILE_TYPE', message: 'Supported file types are .sql, .db, .sqlite, and .sqlite3 database files.' } });
     return;
   }
 
@@ -328,11 +425,35 @@ router.post('/projects/:id/upload-chunk', authenticate, requireProjectOwner, upl
     const adapter = await AdapterFactory.createAdapter(projectId, config);
     const testResult = await adapter.testConnection();
 
+    // Reset previous review history so fresh analysis runs on uploaded database
+    store.resetProjectReviewData(projectId);
+
+    let freshReview: any = null;
+    let freshRecommendations: any[] = [];
+    if (testResult.success) {
+      try {
+        const reviewResult = await ReviewEngine.runReview(projectId, adapter, 500, { resetApplied: true });
+        store.createReview(reviewResult.review, false);
+        store.saveRecommendations(projectId, reviewResult.recommendations);
+        freshReview = reviewResult.review;
+        freshRecommendations = reviewResult.recommendations;
+      } catch (revErr) {
+        console.warn('Initial review on chunked upload failed:', revErr);
+      }
+    }
+
+    const openCount = freshReview?.findings?.filter((f: any) => f.status !== 'APPLIED')?.length || 0;
+    const criticalCount = freshReview?.findings?.filter((f: any) => f.severity === 'CRITICAL')?.length || 0;
+
     store.updateProject(projectId, {
       databaseType: 'sqlite',
       connectionConfig: config,
       connectionStatus: testResult.success ? 'CONNECTED' : 'ERROR',
-      connectionError: testResult.success ? undefined : testResult.message
+      connectionError: testResult.success ? undefined : testResult.message,
+      lastReviewId: freshReview?.id,
+      latestHealthScore: freshReview?.healthScore,
+      totalFindings: openCount,
+      criticalFindings: criticalCount
     });
 
     store.addAuditLog({
@@ -341,16 +462,18 @@ router.post('/projects/:id/upload-chunk', authenticate, requireProjectOwner, upl
       userId: req.user!.id,
       action: 'DATABASE_CONNECTED',
       targetObject: filename,
-      details: `Imported database file "${filename}" (${sizeMb} MB) via chunked streaming`,
-      result: 'SUCCESS',
+      details: `Imported database file "${filename}" (${sizeMb} MB) via chunked streaming and completed initial audit (${openCount} findings)`,
+      result: testResult.success ? 'SUCCESS' : 'FAILURE',
       timestamp: new Date().toISOString()
     });
 
     res.json({
       success: true,
       completed: true,
-      message: `File "${filename}" (${sizeMb} MB) imported successfully!`,
-      testResult
+      message: `File "${filename}" (${sizeMb} MB) imported and connected to workspace successfully!`,
+      testResult,
+      review: freshReview,
+      recommendations: freshRecommendations
     });
   } catch (err: any) {
     if (fs.existsSync(tempFilePath)) {
@@ -378,7 +501,7 @@ router.get('/projects/:id/schema', authenticate, requireProjectOwner, async (req
   }
 
   if (!adapter) {
-    res.status(400).json({ success: false, error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or load a sample database first.' } });
+    res.status(400).json({ success: false, error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or upload a database file first.' } });
     return;
   }
 
@@ -432,7 +555,7 @@ router.post('/projects/:id/profile', authenticate, requireProjectOwner, async (r
   if (!adapter) {
     res.status(400).json({
       success: false,
-      error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or load a sample database first.' }
+      error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or upload a database file first.' }
     });
     return;
   }

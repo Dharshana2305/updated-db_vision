@@ -24,7 +24,7 @@ router.post('/projects/:id/review/run', authenticate, requireProjectOwner, async
   }
 
   if (!adapter) {
-    res.status(400).json({ success: false, error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or load a sample database first.' } });
+    res.status(400).json({ success: false, error: { code: 'NO_CONNECTION', message: 'Database is not connected. Please connect or upload a database file first.' } });
     return;
   }
 
@@ -36,11 +36,12 @@ router.post('/projects/:id/review/run', authenticate, requireProjectOwner, async
     store.saveRecommendations(projectId, recommendations);
 
     // Update project with latest metrics
-    const criticalCount = review.findings.filter(f => f.severity === 'CRITICAL').length;
+    const criticalCount = review.findings.filter(f => f.status !== 'APPLIED' && f.severity === 'CRITICAL').length;
+    const openFindingsCount = review.findings.filter(f => f.status !== 'APPLIED').length;
     store.updateProject(projectId, {
       lastReviewId: review.id,
       latestHealthScore: review.healthScore,
-      totalFindings: review.findings.length,
+      totalFindings: openFindingsCount,
       criticalFindings: criticalCount
     });
 

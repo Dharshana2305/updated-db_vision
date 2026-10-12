@@ -1,0 +1,1 @@
+CREATE TABLE products_v2 (id INTEGER PRIMARY KEY, sku TEXT NOT NULL, price REAL); INSERT INTO products_v2 VALUES (1, 'SKU-100', 29.99);

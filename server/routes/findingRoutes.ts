@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { store } from '../db/store.js';
 import { AuthenticatedRequest, authenticate, requireProjectOwner } from '../middleware/auth.js';
 import { AdapterFactory } from '../adapters/AdapterFactory.js';
-import { prepareExecutableFix } from '../utils/fixUtils.js';
+import { prepareExecutableFix, buildGovernanceSql } from '../utils/fixUtils.js';
 import { HealthScorer } from '../engine/HealthScorer.js';
 import { AuditLog } from '../../src/types.js';
 
@@ -72,21 +72,7 @@ router.post('/findings/:id/apply-fix', authenticate, async (req: AuthenticatedRe
   let cleanSql = executableSql;
 
   if (isGovernance || !cleanSql) {
-    const cleanTitle = (finding.title || 'Architectural Policy').replace(/'/g, "''");
-    const cleanDesc = (finding.description || finding.recommendation || 'Approved').replace(/'/g, "''");
-    const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-    cleanSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${finding.id}', '${finding.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+    cleanSql = buildGovernanceSql(finding, req.user?.email || req.user?.id || 'admin', adapter.type);
   }
 
   try {
@@ -99,21 +85,7 @@ VALUES ('REC-${finding.id}', '${finding.id}', '${cleanTitle}', '${cleanDesc}', '
 
     if (!modRes.success) {
       // Fallback: Register into governance registry so remediation is audited and resolved
-      const cleanTitle = (finding.title || 'Architectural Policy').replace(/'/g, "''");
-      const cleanDesc = (finding.description || finding.recommendation || 'Approved').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      cleanSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${finding.id}', '${finding.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      cleanSql = buildGovernanceSql(finding, req.user?.email || req.user?.id || 'admin', adapter.type);
       modRes = await adapter.executeModification(cleanSql);
     }
 

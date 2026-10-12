@@ -230,31 +230,23 @@ ${schema.tables.map(t => `- **\`${t.name}\`** (${t.rowCount} rows): Primary key 
    */
   private static generateDatasetRefusal(query: string, schema?: DatabaseSchema, reason?: string): string {
     if (!schema || schema.tables.length === 0) {
-      return `### ⚠️ Question Not Based on Dataset
+      return `### ⚠️ Database Not Connected
 
-This question is not based on the loaded dataset because no active database is currently connected to this workspace.
+No active database is currently connected to this workspace.
 
-Please connect a database or load a pre-configured sample database from the **Connection** tab to enable dataset-grounded analysis.`;
+Please connect a database or upload a database file (.sql, .db, .sqlite) from the **Connection** tab.`;
     }
 
     const tableList = schema.tables.map(t => `- **\`${t.name}\`** (${t.columns.length} columns, ${t.rowCount.toLocaleString()} records)`).join('\n');
 
-    return `### ⚠️ Question Beyond Dataset Limits
+    return `### ⚠️ Question Out of Scope
 
-This question is **not based on the loaded dataset**.
+This question is **not related to the connected database**.
 
-The active database **"${schema.databaseName}"** (${schema.databaseType.toUpperCase()}) only contains schema definitions and records for the following **${schema.tables.length} tables**:
+The active database **"${schema.databaseName}"** (${schema.databaseType.toUpperCase()}) contains the following **${schema.tables.length} tables**:
 ${tableList}
 
-${reason ? `*Note: ${reason}*\n\n` : ''}As an AI Database Copilot with strict dataset boundaries, I can only answer questions, explain schemas, and generate SQL queries that are directly grounded in this active database.
-
-**Questions you can ask based on this dataset:**
-- *"How many tables in the dataset?"*
-- *"Show columns and types in \`${schema.tables[0]?.name || 'table'}\`"*
-- *"What are the foreign key relationships?"*
-- *"Explain the database architecture and entities"*
-- *"Why is my health score low?"*
-- *"Show top 5 records from \`${schema.tables[0]?.name || 'table'}\`"*`;
+${reason ? `*Note: ${reason}*\n\n` : ''}As an AI Database Copilot, I can only answer questions, explain schemas, and generate SQL queries that are directly grounded in this database.`;
   }
 
   /**
@@ -461,8 +453,8 @@ User Question: "${processedMessage}"`;
     const lower = msg.toLowerCase();
 
     if (!schema || schema.tables.length === 0) {
-      return `### Dataset Document Status
-No active database schema is currently loaded for this project. Please connect a database or load a pre-configured sample database from the **Connection** tab to enable document-grounded analysis.`;
+      return `### Database Status
+No active database schema is currently loaded for this project. Please connect a database or upload a database file (.sql, .db, .sqlite) from the **Connection** tab to enable analysis.`;
     }
 
     // 1. Table Count / Table List Question ("how many tables in the dataset", "what tables exist", "table count", etc.)

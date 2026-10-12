@@ -1,0 +1,4 @@
+CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);
+CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, total REAL);
+INSERT INTO users VALUES (1, "alice@example.com");
+INSERT INTO orders VALUES (101, 1, 99.95);

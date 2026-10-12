@@ -141,13 +141,9 @@ export const ChatbotPage: React.FC = () => {
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-400">
                 Workspace: {activeProject?.name || 'Workspace'}
               </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                Strict Dataset Limits
-              </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
-              <span>Chat history maintained separately for:</span>
+              <span>Database:</span>
               <strong className="text-slate-200 font-mono font-medium">{activeDbName}</strong>
             </p>
           </div>
@@ -187,23 +183,10 @@ export const ChatbotPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Dataset Boundary Enforcement Banner */}
-      <div className="mb-3 px-3 py-2 rounded-xl bg-sky-950/30 border border-sky-800/30 text-sky-300 text-[11px] flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-2">
-          <Shield className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-          <span>
-            <strong>Dataset Boundary Active:</strong> The AI only answers questions based on tables in <code className="text-sky-200 bg-sky-900/40 px-1 py-0.5 rounded font-mono font-semibold">{activeDbName}</code>. Questions outside this dataset will be declined.
-          </span>
-        </div>
-        <span className="text-[10px] text-slate-400 font-mono hidden md:inline shrink-0">
-          Separate per Database &amp; Workspace
-        </span>
-      </div>
-
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-2">
         {messages.length === 0 ? (
-          <div className="p-8 text-center space-y-5 max-w-xl mx-auto mt-4">
+          <div className="p-8 text-center space-y-4 max-w-xl mx-auto my-auto">
             <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center mx-auto">
               <Bot className="w-6 h-6" />
             </div>
@@ -211,67 +194,9 @@ export const ChatbotPage: React.FC = () => {
               <h3 className="text-sm font-bold text-slate-200">
                 AI Database Copilot &bull; {activeDbName}
               </h3>
-              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-                This conversation thread is isolated exclusively to <strong>{activeDbName}</strong> in <strong>{activeProject?.name}</strong>. It enforces strict dataset grounding and will decline questions outside this database.
+              <p className="text-xs text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+                Ask questions about your database architecture, tables, relationships, performance, or request read-only SQL queries directly for <strong>{activeDbName}</strong> in workspace <strong>{activeProject?.name}</strong>.
               </p>
-            </div>
-
-            {/* Quick Prompts Grid */}
-            <div className="space-y-2 text-left pt-2">
-              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                <span>Dataset-Grounded Questions:</span>
-                <span className="text-emerald-400 text-[10px] font-mono">Answers from schema</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleSend('How many tables in the dataset?')}
-                  className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs border border-slate-800 transition-colors text-left"
-                >
-                  &ldquo;How many tables in the dataset?&rdquo;
-                </button>
-                <button
-                  onClick={() => handleSend('Explain my database architecture')}
-                  className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs border border-slate-800 transition-colors text-left"
-                >
-                  &ldquo;Explain my database architecture&rdquo;
-                </button>
-                <button
-                  onClick={() => handleSend('Show all foreign key relationships')}
-                  className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs border border-slate-800 transition-colors text-left"
-                >
-                  &ldquo;Show all foreign key relationships&rdquo;
-                </button>
-                <button
-                  onClick={() => handleSend('Why is my health score low?')}
-                  className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs border border-slate-800 transition-colors text-left"
-                >
-                  &ldquo;Why is my health score low?&rdquo;
-                </button>
-              </div>
-
-              {/* Test Dataset Boundaries Button */}
-              <div className="pt-2">
-                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between mb-1.5">
-                  <span>Test AI Dataset Limits (Refusal Check):</span>
-                  <span className="text-amber-400 text-[10px] font-mono">Declines out-of-scope</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleSend('What is the capital of France?')}
-                    className="p-2.5 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 text-amber-300/90 text-xs border border-amber-500/20 transition-colors text-left flex items-center justify-between"
-                  >
-                    <span>&ldquo;What is the capital of France?&rdquo;</span>
-                    <span className="text-[10px] font-mono text-amber-400 shrink-0">General trivia &rarr;</span>
-                  </button>
-                  <button
-                    onClick={() => handleSend('Show me all flight airline bookings')}
-                    className="p-2.5 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 text-amber-300/90 text-xs border border-amber-500/20 transition-colors text-left flex items-center justify-between"
-                  >
-                    <span>&ldquo;Show all flight airline bookings&rdquo;</span>
-                    <span className="text-[10px] font-mono text-amber-400 shrink-0">Foreign entity &rarr;</span>
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         ) : (
@@ -374,7 +299,7 @@ export const ChatbotPage: React.FC = () => {
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder={`Ask about ${activeDbName} (queries outside this dataset will be declined)...`}
+            placeholder={`Ask a question or request a SQL query for ${activeDbName}...`}
             className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-sky-500 placeholder:text-slate-500"
           />
           <button

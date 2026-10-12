@@ -66,6 +66,81 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_${targetTable}_${colName}" ON "${targetTa
 }
 
 /**
+ * Builds dialect-compliant SQL for recording policy/guidance approvals in _schema_governance.
+ */
+export function buildGovernanceSql(
+  item: { id: string; findingId?: string; title: string; guidance?: string; description?: string; recommendation?: string; why?: string; proposedOperation?: string },
+  user: string = 'admin',
+  dbType: string = 'sqlite'
+): string {
+  const cleanTitle = (item.title || 'Architectural Policy').replace(/'/g, "''");
+  const cleanGuidance = (item.guidance || item.description || item.recommendation || item.why || item.proposedOperation || 'Approved policy guidance').replace(/'/g, "''");
+  const cleanUser = (user || 'admin').replace(/'/g, "''");
+  const recId = (item.id || '').replace(/'/g, "''");
+  const findingId = (item.findingId || item.id || '').replace(/'/g, "''");
+  const now = new Date().toISOString();
+
+  if (dbType === 'postgres' || dbType === 'postgresql') {
+    return `CREATE TABLE IF NOT EXISTS _schema_governance (
+  id SERIAL PRIMARY KEY,
+  recommendation_id TEXT,
+  finding_id TEXT,
+  title TEXT,
+  guidance TEXT,
+  approved_by TEXT,
+  approved_at TEXT,
+  status TEXT
+);
+INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
+VALUES ('${recId}', '${findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${now}', 'APPROVED');`;
+  }
+
+  if (dbType === 'mysql' || dbType === 'mariadb') {
+    return `CREATE TABLE IF NOT EXISTS _schema_governance (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  recommendation_id VARCHAR(255),
+  finding_id VARCHAR(255),
+  title TEXT,
+  guidance TEXT,
+  approved_by VARCHAR(255),
+  approved_at VARCHAR(100),
+  status VARCHAR(50)
+);
+INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
+VALUES ('${recId}', '${findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${now}', 'APPROVED');`;
+  }
+
+  if (dbType === 'duckdb') {
+    return `CREATE TABLE IF NOT EXISTS _schema_governance (
+  id BIGINT,
+  recommendation_id VARCHAR,
+  finding_id VARCHAR,
+  title VARCHAR,
+  guidance VARCHAR,
+  approved_by VARCHAR,
+  approved_at VARCHAR,
+  status VARCHAR
+);
+INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
+VALUES (1, '${recId}', '${findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${now}', 'APPROVED');`;
+  }
+
+  // SQLite and default
+  return `CREATE TABLE IF NOT EXISTS _schema_governance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recommendation_id TEXT,
+  finding_id TEXT,
+  title TEXT,
+  guidance TEXT,
+  approved_by TEXT,
+  approved_at TEXT,
+  status TEXT
+);
+INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
+VALUES ('${recId}', '${findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${now}', 'APPROVED');`;
+}
+
+/**
  * Splits a SQL script into individual statements safely without breaking on semicolons
  * inside string literals ('...', "...", `...`).
  */

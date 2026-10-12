@@ -56,20 +56,46 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             id="btn-trigger-review"
             onClick={onTriggerReview}
             disabled={reviewing || activeProject?.connectionStatus !== 'CONNECTED'}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold transition-all shadow-lg shadow-sky-600/20"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold transition-all shadow-lg shadow-sky-600/20 cursor-pointer"
           >
             <Search className={`w-4 h-4 ${reviewing ? 'animate-spin' : ''}`} />
             <span>{reviewing ? 'Executing Review...' : 'Run Full Review'}</span>
           </button>
           <button
             onClick={() => onNavigateToTab('chat')}
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors border border-slate-700"
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors border border-slate-700 cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-sky-400" />
             <span>AI Copilot</span>
           </button>
         </div>
       </div>
+
+      {/* Disconnected Workspace Banner if not connected */}
+      {activeProject && activeProject.connectionStatus !== 'CONNECTED' && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 text-amber-400">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-amber-100">
+                Workspace is not connected to a database
+              </div>
+              <p className="text-[11px] text-amber-300/80 mt-0.5">
+                Connect a file-based database (.sql, .db, .sqlite, .sqlite3) or a live server database to unlock automated schema audits, ER diagrams, and flaw remediation.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigateToTab('connection')}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shrink-0 transition-colors shadow-md cursor-pointer flex items-center gap-1.5"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Connect Database Now</span>
+          </button>
+        </div>
+      )}
 
       {/* Metric Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -179,16 +205,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <div>
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-sm">Database Instance</h3>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                ACTIVE
-              </span>
+              {activeProject?.connectionStatus === 'CONNECTED' ? (
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  CONNECTED
+                </span>
+              ) : activeProject?.connectionStatus === 'ERROR' ? (
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                  ERROR
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  NOT CONNECTED
+                </span>
+              )}
             </div>
 
             <div className="mt-4 space-y-2.5 text-xs">
               <div className="flex justify-between py-1 border-b border-slate-800/50">
                 <span className="text-slate-400">Instance Name</span>
                 <span className="text-slate-200 font-mono font-semibold truncate max-w-[150px]">
-                  {schema?.databaseName || activeProject?.connectionConfig?.name || 'Local SQLite'}
+                  {schema?.databaseName || activeProject?.connectionConfig?.name || activeProject?.connectionConfig?.database || 'Not Connected'}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/50">
@@ -213,10 +252,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <div className="space-y-2 pt-2">
             <button
               onClick={() => onNavigateToTab('connection')}
-              className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors flex items-center justify-center gap-2 border border-slate-700"
+              className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
             >
               <Database className="w-3.5 h-3.5 text-sky-400" />
-              <span>Switch or Load Sample DB</span>
+              <span>{activeProject?.connectionStatus === 'CONNECTED' ? 'Manage DB Connection' : 'Connect Database (.sql, .db, server)'}</span>
             </button>
             <button
               onClick={() => onNavigateToTab('erdiagram')}

@@ -20,7 +20,8 @@ import {
   Download,
   Database,
   FileCode,
-  Sparkles
+  Sparkles,
+  CheckCheck
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext.js';
 import { SeverityBadge } from '../components/SeverityBadge.js';
@@ -39,6 +40,7 @@ export const FindingsPage: React.FC = () => {
   const [savingNote, setSavingNote] = useState<string | null>(null);
   const [applyingFixId, setApplyingFixId] = useState<string | null>(null);
   const [isBulkFixing, setIsBulkFixing] = useState(false);
+  const [isBulkApproving, setIsBulkApproving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [downloadDropdown, setDownloadDropdown] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -46,6 +48,24 @@ export const FindingsPage: React.FC = () => {
   const [isResetting, setIsResetting] = useState(false);
 
   const findings = latestReview?.findings || [];
+
+  const handleApproveAll = async () => {
+    if (!activeProject || isBulkApproving) return;
+
+    setIsBulkApproving(true);
+    setActionFeedback(null);
+    try {
+      const res = await api.approveAllRecommendations(activeProject.id);
+      setActionFeedback({ type: 'success', message: res.message || `Successfully approved & applied ${res.count || 'all'} recommendations!` });
+      setShowFixedBanner(true);
+      await refreshReviewData();
+      await refreshSchema();
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', message: `Approval execution failed: ${err.message}` });
+    } finally {
+      setIsBulkApproving(false);
+    }
+  };
 
   const handleFixAll = async () => {
     if (!activeProject || isBulkFixing) return;
@@ -186,7 +206,7 @@ export const FindingsPage: React.FC = () => {
           {/* Reset / Re-audit Flaws */}
           <button
             onClick={handleResetAudit}
-            disabled={isResetting || isBulkFixing}
+            disabled={isResetting || isBulkFixing || isBulkApproving}
             className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-400 border border-sky-500/30 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
             title="Reset audit and re-open flaws to test 1-Click Fix"
           >
@@ -194,9 +214,21 @@ export const FindingsPage: React.FC = () => {
             <span>{isResetting ? 'Resetting...' : 'Reset Flaws'}</span>
           </button>
 
+          {/* 1-Click Approve All */}
+          <button
+            onClick={handleApproveAll}
+            disabled={isBulkApproving || isBulkFixing || isResetting}
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="Approve and apply all recommendations in one click"
+          >
+            <CheckCheck className="w-4 h-4" />
+            <span>{isBulkApproving ? 'Approving & Applying...' : openCount > 0 ? `Approve & Apply All (${openCount})` : 'Approve & Re-verify All'}</span>
+          </button>
+
+          {/* 1-Click Fix All Flaws */}
           <button
             onClick={handleFixAll}
-            disabled={isBulkFixing || isResetting}
+            disabled={isBulkFixing || isBulkApproving || isResetting}
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-emerald-600 hover:from-sky-500 hover:to-emerald-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
             title="Fix all open findings & flaws in one click"
           >

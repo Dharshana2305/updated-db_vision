@@ -61,7 +61,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [user]);
 
   const refreshSchema = useCallback(async () => {
-    if (!activeProject) {
+    if (!activeProject?.id) {
       setSchema(null);
       return;
     }
@@ -71,10 +71,10 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
     } catch {
       setSchema(null);
     }
-  }, [activeProject]);
+  }, [activeProject?.id]);
 
   const refreshReviewData = useCallback(async () => {
-    if (!activeProject) {
+    if (!activeProject?.id) {
       setLatestReview(null);
       setRecommendations([]);
       return;
@@ -89,21 +89,30 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       const recRes = await api.getRecommendations(activeProject.id);
       setRecommendations(recRes.recommendations || []);
+
+      const prjRes = await api.getProjects();
+      if (prjRes.projects) {
+        setProjects(prjRes.projects);
+        const updatedCurr = prjRes.projects.find(p => p.id === activeProject.id);
+        if (updatedCurr) {
+          setActiveProject(updatedCurr);
+        }
+      }
     } catch (err) {
       console.error('Failed to refresh review data:', err);
     }
-  }, [activeProject]);
+  }, [activeProject?.id]);
 
   useEffect(() => {
     refreshProjects();
   }, [refreshProjects]);
 
   useEffect(() => {
-    if (activeProject) {
+    if (activeProject?.id) {
       refreshSchema();
       refreshReviewData();
     }
-  }, [activeProject, refreshSchema, refreshReviewData]);
+  }, [activeProject?.id, refreshSchema, refreshReviewData]);
 
   const selectProject = (p: Project) => {
     setActiveProject(p);

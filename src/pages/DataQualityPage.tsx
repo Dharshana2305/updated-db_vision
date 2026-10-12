@@ -57,7 +57,7 @@ export const DataQualityPage: React.FC = () => {
         </div>
         <h3 className="text-base font-semibold text-slate-200">No Database Connected</h3>
         <p className="text-xs text-slate-400">
-          Connect your database or load a pre-configured sample database to run automated null-ratio, cardinality, and PII profiling.
+          Connect your workspace to a database (.sql, .db, .sqlite, .sqlite3, or live server) to run automated null-ratio, cardinality, and PII profiling.
         </p>
       </div>
     );

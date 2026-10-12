@@ -5,7 +5,7 @@ import { AuthenticatedRequest, authenticate, requireProjectOwner } from '../midd
 import { AdapterFactory } from '../adapters/AdapterFactory.js';
 import { SQLiteAdapter } from '../adapters/SQLiteAdapter.js';
 import { ReviewEngine } from '../engine/ReviewEngine.js';
-import { prepareExecutableFix } from '../utils/fixUtils.js';
+import { prepareExecutableFix, buildGovernanceSql } from '../utils/fixUtils.js';
 import { HealthScorer } from '../engine/HealthScorer.js';
 import { AuditLog } from '../../src/types.js';
 
@@ -69,21 +69,7 @@ router.post('/recommendations/:id/approve', authenticate, async (req: Authentica
 
   if (!executableSql || isArchitecturalGovernance) {
     isArchitecturalGovernance = true;
-    const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-    const cleanGuidance = (rec.recommendation || rec.why || rec.proposedOperation || 'Approved policy guidance').replace(/'/g, "''");
-    const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-    executableSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+    executableSql = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
   }
 
   try {
@@ -97,21 +83,7 @@ VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '$
 
     if (!modRes.success) {
       // Fallback: Register into governance registry so remediation is safely applied and audited
-      const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-      const cleanGuidance = (rec.recommendation || rec.why || rec.proposedOperation || 'Approved policy guidance').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      executableSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      executableSql = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
       isArchitecturalGovernance = true;
       try {
         modRes = await adapter.executeModification(executableSql);
@@ -427,42 +399,14 @@ router.post('/projects/:id/recommendations/approve-all', authenticate, requirePr
 
     let sqlToExecute = executableSql;
     if (isGovernance || !sqlToExecute) {
-      const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-      const cleanGuidance = (rec.recommendation || rec.why || rec.proposedOperation || 'Approved policy guidance').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      sqlToExecute = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      sqlToExecute = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
     }
 
     try {
       let modRes = await adapter.executeModification(sqlToExecute);
       if (!modRes.success) {
         // Fallback to registering in governance table
-        const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-        const cleanGuidance = (rec.recommendation || rec.why || rec.proposedOperation || 'Approved policy guidance').replace(/'/g, "''");
-        const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-        const govSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+        const govSql = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
         modRes = await adapter.executeModification(govSql);
       }
 
@@ -495,40 +439,12 @@ VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '$
     const { executableSql, isGovernance } = prepareExecutableFix(f.suggestedFix || '', f.table, adapter.type);
     let sqlToExecute = executableSql;
     if (isGovernance || !sqlToExecute) {
-      const cleanTitle = (f.title || 'Architectural Policy').replace(/'/g, "''");
-      const cleanDesc = (f.description || f.recommendation || 'Approved').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      sqlToExecute = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${f.id}', '${f.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      sqlToExecute = buildGovernanceSql(f, req.user?.email || req.user?.id || 'admin', adapter.type);
     }
     try {
       let modRes = await adapter.executeModification(sqlToExecute);
       if (!modRes.success) {
-        const cleanTitle = (f.title || 'Architectural Policy').replace(/'/g, "''");
-        const cleanDesc = (f.description || f.recommendation || 'Approved').replace(/'/g, "''");
-        const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-        const govSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${f.id}', '${f.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+        const govSql = buildGovernanceSql(f, req.user?.email || req.user?.id || 'admin', adapter.type);
         modRes = await adapter.executeModification(govSql);
       }
       if (modRes.success) {
@@ -703,41 +619,13 @@ router.post('/projects/:id/fix-all', authenticate, requireProjectOwner, async (r
 
     let sqlToExecute = executableSql;
     if (isGovernance || !sqlToExecute) {
-      const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-      const cleanGuidance = (rec.recommendation || rec.why || 'Approved policy').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      sqlToExecute = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      sqlToExecute = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
     }
 
     try {
       let modRes = await adapter.executeModification(sqlToExecute);
       if (!modRes.success) {
-        const cleanTitle = (rec.title || 'Architectural Guidance').replace(/'/g, "''");
-        const cleanGuidance = (rec.recommendation || rec.why || 'Approved policy').replace(/'/g, "''");
-        const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-        const govSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+        const govSql = buildGovernanceSql(rec, req.user?.email || req.user?.id || 'admin', adapter.type);
         modRes = await adapter.executeModification(govSql);
       }
 
@@ -766,41 +654,13 @@ VALUES ('${rec.id}', '${rec.findingId}', '${cleanTitle}', '${cleanGuidance}', '$
     const { executableSql, isGovernance } = prepareExecutableFix(f.suggestedFix || '', f.table, adapter.type);
     let sqlToExecute = executableSql;
     if (isGovernance || !sqlToExecute) {
-      const cleanTitle = (f.title || 'Architectural Policy').replace(/'/g, "''");
-      const cleanDesc = (f.description || f.recommendation || 'Approved').replace(/'/g, "''");
-      const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-      sqlToExecute = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${f.id}', '${f.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+      sqlToExecute = buildGovernanceSql(f, req.user?.email || req.user?.id || 'admin', adapter.type);
     }
 
     try {
       let modRes = await adapter.executeModification(sqlToExecute);
       if (!modRes.success) {
-        const cleanTitle = (f.title || 'Architectural Policy').replace(/'/g, "''");
-        const cleanDesc = (f.description || f.recommendation || 'Approved').replace(/'/g, "''");
-        const cleanUser = (req.user?.email || req.user?.id || 'admin').replace(/'/g, "''");
-        const govSql = `CREATE TABLE IF NOT EXISTS _schema_governance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recommendation_id TEXT,
-  finding_id TEXT,
-  title TEXT,
-  guidance TEXT,
-  approved_by TEXT,
-  approved_at TEXT,
-  status TEXT
-);
-INSERT INTO _schema_governance (recommendation_id, finding_id, title, guidance, approved_by, approved_at, status)
-VALUES ('REC-${f.id}', '${f.id}', '${cleanTitle}', '${cleanDesc}', '${cleanUser}', '${new Date().toISOString()}', 'APPROVED');`;
+        const govSql = buildGovernanceSql(f, req.user?.email || req.user?.id || 'admin', adapter.type);
         modRes = await adapter.executeModification(govSql);
       }
       if (modRes.success) {

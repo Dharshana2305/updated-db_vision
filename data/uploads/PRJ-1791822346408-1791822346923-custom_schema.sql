@@ -1,0 +1,1 @@
+CREATE TABLE test_items (id INTEGER PRIMARY KEY, title TEXT NOT NULL); INSERT INTO test_items VALUES (1, 'Item A');
